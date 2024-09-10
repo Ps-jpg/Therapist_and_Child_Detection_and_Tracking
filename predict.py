@@ -1,169 +1,180 @@
 import os
 import cv2
 import numpy as np
-import argparse
 from roboflow import Roboflow
-import sys
-import supervision as sv
+import argparse
+from tqdm import tqdm
+import tkinter as tk
+from PIL import Image, ImageTk
 
-# Set up the Roboflow API
-def initialize_roboflow(api_key):
-    rf = Roboflow(api_key=api_key)
-    project = rf.workspace().project("first-po0yz")
-    model = project.version(3).model
-    return model
+# Initialize Roboflow with your API key
+api_key = "9dMxf4G2rQNy0BGmjzt6"
+model_id = "first-po0yz/3"
 
-# Define a class for tracking people
-class PersonTracker:
-    def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3):
-        self.tracker = Sort(max_age=max_age, min_hits=min_hits, iou_threshold=iou_threshold)
-        self.track_history = {}
+# Initialize Roboflow
+rf = Roboflow(api_key=api_key)
+project = rf.workspace().project("first-po0yz")
+model = project.version(3).model  # Ensure you replace VERSION with the correct version number
 
-    def update(self, detections):
-        if len(detections) == 0:
-            return []
+# Video paths
+VIDEOS_DIR = os.path.join('.', 'videos')
 
-        detection_array = np.array([[d[2], d[3], d[4], d[5], d[7]] for d in detections])
-        tracked_objects = self.tracker.update(detection_array)
-
-        results = []
-        for track in tracked_objects:
-            track_id = int(track[4])
-            bbox = track[:4]
-            centroid = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
-            
-            if track_id not in self.track_history:
-                self.track_history[track_id] = {
-                    'class': next((d[6] for d in detections if self.iou(bbox, d[2:6]) > 0.5), 'unknown'),
-                    'last_seen': 0
-                }
-            else:
-                self.track_history[track_id]['last_seen'] = 0
-
-            results.append((centroid[0], centroid[1], bbox[0], bbox[1], bbox[2], bbox[3],
-                            self.track_history[track_id]['class'], 1.0, track_id))
-
-        # Handle disappeared tracks
-        for track_id in list(self.track_history.keys()):
-            if self.track_history[track_id]['last_seen'] > 60:  # If not seen for 2 seconds (assuming 30 fps)
-                del self.track_history[track_id]
-            else:
-                self.track_history[track_id]['last_seen'] += 1
-
-        return results
-
-    @staticmethod
-    def iou(bbox1, bbox2):
-        """Calculate IoU between two bounding boxes"""
-        x1, y1, x2, y2 = bbox1
-        x1_, y1_, x2_, y2_ = bbox2
-        
-        xi1, yi1 = max(x1, x1_), max(y1, y1_)
-        xi2, yi2 = min(x2, x2_), min(y2, y2_)
-        inter_area = max(xi2 - xi1, 0) * max(yi2 - yi1, 0)
-        
-        box1_area = (x2 - x1) * (y2 - y1)
-        box2_area = (x2_ - x1_) * (y2_ - y1_)
-        union_area = box1_area + box2_area - inter_area
-        
-        iou = inter_area / union_area if union_area > 0 else 0
-        return iou
-
-# Process a video file
-def process_video(video_path, model):
-    video_path_out = f'{os.path.splitext(video_path)[0]}_out.mp4'
+def process_video(video_path):
+    video_path_out = '{}_out.mp4'.format(os.path.splitext(video_path)[0])
 
     # Open video file
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Error: Unable to open video file {video_path}")
+    ret, frame = cap.read()
+
+    if not ret:
+        print("Failed to read the video file.")
         return
 
-    # Get frame dimensions and create a video writer for output
-    W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # Get frame dimensions
+    H, W, _ = frame.shape
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(video_path_out, fourcc, int(cap.get(cv2.CAP_PROP_FPS)), (W, H))
 
-    threshold = 0.5  # Confidence threshold
-    person_tracker = PersonTracker()
+    threshold = 0.8  # Detection confidence threshold
+    frame_limit = float('inf')  # Process the entire video
+    frame_counter = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Initialize tracking variables
+    trackers = []
+    track_ids = []
+    kalman_filters = []
+    next_id = 1
+    last_seen = {}
 
-        # Predict using Roboflow on the current frame
-        response = model.predict(frame, confidence=40, overlap=30).json()
+    # Create a Tkinter window
+    window = tk.Tk()
+    window.title("Video Tracking")
 
-        # Detections
+    # Create a label to display the video
+    label = tk.Label(window)
+    label.pack()
+
+    # Loop through video frames
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    pbar = tqdm(total=total_frames, desc="Processing Frames", unit="frames")
+
+    while ret:
+        try:
+            # Predict using Roboflow on the current frame
+            response = model.predict(frame, confidence=40, overlap=30).json()
+        except Exception as e:
+            print(f"Error predicting frame: {e}")
+            ret, frame = cap.read()
+            continue
+
+        # Create a list to hold the detected objects
         detections = []
-        for pred in response['predictions']:
-            x1 = int(pred['x'] - pred['width'] / 2)
-            y1 = int(pred['y'] - pred['height'] / 2)
-            x2 = int(pred['x'] + pred['width'] / 2)
-            y2 = int(pred['y'] + pred['height'] / 2)
-            conf = pred['confidence']
-            class_name = pred['class']
+
+        # Process predictions
+        for prediction in response['predictions']:
+            x1 = int(prediction['x'] - prediction['width'] / 2)
+            y1 = int(prediction['y'] - prediction['height'] / 2)
+            x2 = int(prediction['x'] + prediction['width'] / 2)
+            y2 = int(prediction['y'] + prediction['height'] / 2)
+            conf = prediction['confidence']
+            class_name = prediction['class']
 
             if conf > threshold:
                 centroid_x = int((x1 + x2) / 2)
                 centroid_y = int((y1 + y2) / 2)
                 detections.append((centroid_x, centroid_y, x1, y1, x2, y2, class_name, conf))
 
-        # Update trackers
-        tracked_objects = person_tracker.update(detections)
+        # Update existing trackers and assign new ones
+        new_trackers = []
+        for (centroid_x, centroid_y, x1, y1, x2, y2, class_name, conf) in detections:
+            matched = False
+            for i, (tracker, kalman_filter) in enumerate(zip(trackers, kalman_filters)):
+                if np.linalg.norm(
+                        np.array(tracker[:2]) - np.array([centroid_x, centroid_y])) < 30:  # Adjust threshold as needed
+                    trackers[i] = (centroid_x, centroid_y, x1, y1, x2, y2)
+                    kalman_filter.predict()
+                    measurement = np.array([centroid_x, centroid_y, 0, 0], dtype=np.float32)
+                    kalman_filter.correct(measurement)
+                    matched = True
+                    break
 
-        # Convert detections to supervision format
-        supervision_detections = sv.Detections.from_roboflow(response)
+            if not matched:
+                trackers.append((centroid_x, centroid_y, x1, y1, x2, y2))
+                track_ids.append(next_id)
+                next_id += 1
+                kf = cv2.KalmanFilter(4, 4)
+                kf.transitionMatrix = np.array([[1, 0, 1, 0],
+                                                [0, 1, 0, 1],
+                                                [0, 0, 1, 0],
+                                                [0, 0, 0, 1]], dtype=np.float32)
+                kf.measurementMatrix = np.array([[1, 0, 0, 0],
+                                                 [0, 1, 0, 0],
+                                                 [0, 0, 1, 0],
+                                                 [0, 0, 0, 1]], dtype=np.float32)
+                kf.processNoiseCov = 1e-4 * np.eye(4, dtype=np.float32)
+                kf.measurementNoiseCov = 1e-3 * np.eye(4, dtype=np.float32)
+                kf.errorCovPost = 1e-1 * np.eye(4, dtype=np.float32)
+                kf.statePost = np.array([centroid_x, centroid_y, 0, 0], dtype=np.float32)
+                kalman_filters.append(kf)
 
-        # Annotate the frame with bounding boxes and labels
-        label_annotator = sv.LabelAnnotator()
-        box_annotator = sv.BoxAnnotator()
-        annotated_frame = box_annotator.annotate(scene=frame, detections=supervision_detections)
-        annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=supervision_detections, labels=[item["class"] for item in response["predictions"]])
+        # Remove trackers that have not been seen for a certain number of frames
+        trackers_to_remove = []
+        for i, (tracker, track_id) in enumerate(zip(trackers, track_ids)):
+            if track_id in last_seen:
+                if frame_counter - last_seen[track_id] > 30:  # Adjust the threshold as needed
+                    trackers_to_remove.append(i)
+            else:
+                last_seen[track_id] = frame_counter
 
-        # Draw bounding boxes and track IDs on the frame
-        for obj in tracked_objects:
-            centroid_x, centroid_y, x1, y1, x2, y2, class_name, conf, track_id = obj
-            color = (0, 255, 0) if class_name == 'adult' else (0, 0, 255)
-            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            label = f"ID: {track_id} | {class_name.capitalize()} | Conf: {conf:.2f}"
-            cv2.putText(annotated_frame, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            cv2.circle(annotated_frame, (int(centroid_x), int(centroid_y)), 5, (255, 0, 0), -1)
+        for index in sorted(trackers_to_remove, reverse=True):
+            del trackers[index]
+            del track_ids[index]
+            del kalman_filters[index]
 
-        # Write processed frame to output
-        out.write(annotated_frame)
+        # Draw bounding boxes and IDs
+        for i, (tracker, track_id) in enumerate(zip(trackers, track_ids)):
+            centroid_x, centroid_y, x1, y1, x2, y2 = tracker
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"ID: {track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            cv2.circle(frame, (centroid_x, centroid_y), 5, (0, 0, 255), -1)
 
-        # Display the frame (optional)
-        cv2.imshow('Detection', annotated_frame)
+        # Write the processed frame to the output video
+        out.write(frame)
+
+        # Display the frame in the Tkinter window
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img)
+        imgtk = ImageTk.PhotoImage(image=img)
+        label.config(image=imgtk)
+        label.image = imgtk
+        window.update()
+
+        # Wait for key press (exit by pressing 'q')
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    # Release resources
+        # Read the next frame
+        ret, frame = cap.read()
+        pbar.update(1)
+
+    # Release video resources
     cap.release()
     out.release()
-    cv2.destroyAllWindows()
-    print(f"Processed video saved at: {video_path_out}")
+    window.destroy()
+    pbar.close()
 
-# Main function
 def main():
-    api_key = "9dMxf4G2rQNy0BGmjzt6"
-    model = initialize_roboflow(api_key)
-
     parser = argparse.ArgumentParser(description="Video tracking using Roboflow and OpenCV")
-    parser.add_argument('--file_name', type=str, help='Specify the video file to scan and track')
+    parser.add_argument('--filename', type=str, help='Specify the video file to scan and track')
     args = parser.parse_args()
 
-    VIDEOS_DIR = './videos'
-
-    if args.file_name:
-        video_path = os.path.join(VIDEOS_DIR, args.file_name)
+    if args.filename:
+        video_path = os.path.join(VIDEOS_DIR, args.filename)
         if os.path.exists(video_path):
-            print(f"Processing video: {args.file_name}")
-            process_video(video_path, model)
+            print(f"Processing video: {args.filename}")
+            process_video(video_path)
         else:
-            print(f"File {args.file_name} does not exist.")
+            print(f"File {args.filename} does not exist.")
     else:
         video_files = [f for f in os.listdir(VIDEOS_DIR) if f.endswith(('.mp4', '.avi'))]
         if not video_files:
@@ -171,7 +182,7 @@ def main():
             return
         for video_file in video_files:
             print(f"Processing video: {video_file}")
-            process_video(os.path.join(VIDEOS_DIR, video_file), model)
+            process_video(os.path.join(VIDEOS_DIR, video_file))
 
 if __name__ == '__main__':
     main()
