@@ -4,20 +4,16 @@ import numpy as np
 import argparse
 from roboflow import Roboflow
 import sys
+import supervision as sv
 
-# Add the sort-master directory to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sort_dir = os.path.join(current_dir, 'sort-master')
-sys.path.append(sort_dir)
+# Set up the Roboflow API
+def initialize_roboflow(api_key):
+    rf = Roboflow(api_key=api_key)
+    project = rf.workspace().project("first-po0yz")
+    model = project.version(3).model
+    return model
 
-# Import Sort
-from sort import Sort
-
-# Initialize Roboflow with your API key
-rf = Roboflow(api_key="PUXSE0Wcz4NrQf4xpfsK")
-project = rf.workspace().project("first-po0yz")
-model = project.version(3).model  # Replace '3' with your version number if different
-
+# Define a class for tracking people
 class PersonTracker:
     def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3):
         self.tracker = Sort(max_age=max_age, min_hits=min_hits, iou_threshold=iou_threshold)
@@ -73,7 +69,8 @@ class PersonTracker:
         iou = inter_area / union_area if union_area > 0 else 0
         return iou
 
-def process_video(video_path):
+# Process a video file
+def process_video(video_path, model):
     video_path_out = f'{os.path.splitext(video_path)[0]}_out.mp4'
 
     # Open video file
@@ -117,20 +114,29 @@ def process_video(video_path):
         # Update trackers
         tracked_objects = person_tracker.update(detections)
 
+        # Convert detections to supervision format
+        supervision_detections = sv.Detections.from_roboflow(response)
+
+        # Annotate the frame with bounding boxes and labels
+        label_annotator = sv.LabelAnnotator()
+        box_annotator = sv.BoxAnnotator()
+        annotated_frame = box_annotator.annotate(scene=frame, detections=supervision_detections)
+        annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=supervision_detections, labels=[item["class"] for item in response["predictions"]])
+
         # Draw bounding boxes and track IDs on the frame
         for obj in tracked_objects:
             centroid_x, centroid_y, x1, y1, x2, y2, class_name, conf, track_id = obj
             color = (0, 255, 0) if class_name == 'adult' else (0, 0, 255)
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             label = f"ID: {track_id} | {class_name.capitalize()} | Conf: {conf:.2f}"
-            cv2.putText(frame, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            cv2.circle(frame, (int(centroid_x), int(centroid_y)), 5, (255, 0, 0), -1)
+            cv2.putText(annotated_frame, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.circle(annotated_frame, (int(centroid_x), int(centroid_y)), 5, (255, 0, 0), -1)
 
         # Write processed frame to output
-        out.write(frame)
+        out.write(annotated_frame)
 
         # Display the frame (optional)
-        cv2.imshow('Detection', frame)
+        cv2.imshow('Detection', annotated_frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -140,7 +146,11 @@ def process_video(video_path):
     cv2.destroyAllWindows()
     print(f"Processed video saved at: {video_path_out}")
 
+# Main function
 def main():
+    api_key = "9dMxf4G2rQNy0BGmjzt6"
+    model = initialize_roboflow(api_key)
+
     parser = argparse.ArgumentParser(description="Video tracking using Roboflow and OpenCV")
     parser.add_argument('--file_name', type=str, help='Specify the video file to scan and track')
     args = parser.parse_args()
@@ -151,7 +161,7 @@ def main():
         video_path = os.path.join(VIDEOS_DIR, args.file_name)
         if os.path.exists(video_path):
             print(f"Processing video: {args.file_name}")
-            process_video(video_path)
+            process_video(video_path, model)
         else:
             print(f"File {args.file_name} does not exist.")
     else:
@@ -161,7 +171,7 @@ def main():
             return
         for video_file in video_files:
             print(f"Processing video: {video_file}")
-            process_video(os.path.join(VIDEOS_DIR, video_file))
+            process_video(os.path.join(VIDEOS_DIR, video_file), model)
 
 if __name__ == '__main__':
     main()
