@@ -14,6 +14,9 @@ Model Type: Roboflow 3.0 Object Detection (Accurate)
 Checkpoint: COCOs
 ![results](https://github.com/user-attachments/assets/6e03f2ce-8ed1-4b0f-9029-995f2d18ef30)
 
+![Screenshot 2024-09-10 at 16-39-02 First - v3 Final](https://github.com/user-attachments/assets/fc3dbe45-2a0d-4bba-b127-49112f5bfba2)
+![Screenshot 2024-09-10 at 16-39-15 First - v3 Final](https://github.com/user-attachments/assets/0d4fe931-2ff5-402b-9412-07b365de6e69)
+
 
 
 
@@ -70,6 +73,6 @@ If you encounter any issues with the project, feel free to open an issue on the 
 Early version of the system
 
 
+![Jan 5 SonRise Mom Early version](https://github.com/user-attachments/assets/1a480fbd-53e0-47ee-8ac4-007b5e4c3d4f)
 
-https://github.com/user-attachments/assets/b3e7c9f6-999f-4e15-bec3-e2de98e84aa2
 
