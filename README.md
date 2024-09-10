@@ -2,7 +2,7 @@ Here is the updated README with color codes for the text:
 
 README
 
-roject: Video Tracking using Roboflow and OpenCV
+Project: Video Tracking using Roboflow and OpenCV
 
 Overview
 
