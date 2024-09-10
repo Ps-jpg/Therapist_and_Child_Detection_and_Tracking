@@ -7,14 +7,14 @@ from tqdm import tqdm
 import tkinter as tk
 from PIL import Image, ImageTk
 
-# Initialize Roboflow with your API key
+
 api_key = "9dMxf4G2rQNy0BGmjzt6"
 model_id = "first-po0yz/3"
 
 # Initialize Roboflow
 rf = Roboflow(api_key=api_key)
 project = rf.workspace().project("first-po0yz")
-model = project.version(3).model  # Ensure you replace VERSION with the correct version number
+model = project.version(3).model 
 
 # Video paths
 VIDEOS_DIR = os.path.join('.', 'videos')
@@ -90,7 +90,7 @@ def process_video(video_path):
             matched = False
             for i, (tracker, kalman_filter) in enumerate(zip(trackers, kalman_filters)):
                 if np.linalg.norm(
-                        np.array(tracker[:2]) - np.array([centroid_x, centroid_y])) < 30:  # Adjust threshold as needed
+                        np.array(tracker[:2]) - np.array([centroid_x, centroid_y])) < 30:  
                     trackers[i] = (centroid_x, centroid_y, x1, y1, x2, y2)
                     kalman_filter.predict()
                     measurement = np.array([centroid_x, centroid_y, 0, 0], dtype=np.float32)
@@ -121,7 +121,7 @@ def process_video(video_path):
         trackers_to_remove = []
         for i, (tracker, track_id) in enumerate(zip(trackers, track_ids)):
             if track_id in last_seen:
-                if frame_counter - last_seen[track_id] > 30:  # Adjust the threshold as needed
+                if frame_counter - last_seen[track_id] > 30:  #threshold
                     trackers_to_remove.append(i)
             else:
                 last_seen[track_id] = frame_counter
@@ -149,7 +149,7 @@ def process_video(video_path):
         label.image = imgtk
         window.update()
 
-        # Wait for key press (exit by pressing 'q')
+        # exit by pressing 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -157,7 +157,7 @@ def process_video(video_path):
         ret, frame = cap.read()
         pbar.update(1)
 
-    # Release video resources
+    # Release  resources
     cap.release()
     out.release()
     window.destroy()
