@@ -66,3 +66,10 @@ nvidia-smi
 dont believe gpu usage shown in task manager its wrong idk why.
 
 If you encounter any issues with the project, feel free to open an issue on the repository.
+
+Early version of the system
+
+
+
+https://github.com/user-attachments/assets/b3e7c9f6-999f-4e15-bec3-e2de98e84aa2
+
