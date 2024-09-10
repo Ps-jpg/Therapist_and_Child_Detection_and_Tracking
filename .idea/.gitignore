@@ -1,0 +1,12 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+videos/
+myenv/
+/videos
+/myenv
+/videos/
+/myenv/
+*.mp4
+*.zip
+*.jar
