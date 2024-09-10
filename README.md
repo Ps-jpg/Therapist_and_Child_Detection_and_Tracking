@@ -1,4 +1,3 @@
-Here is the updated README with color codes for the text:
 
 README
 
